@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Doodle Jump</title>
+
+<style>
+html,body{
+  margin:0;padding:0;overflow:hidden;
+  background:#87CEEB;font-family:Arial;
+}
+canvas{
+  display:block;
+  touch-action:none;
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+}
+#startScreen,#gameOverScreen{
+  position:fixed;inset:0;
+  background:rgba(135,206,235,.95);
+  display:flex;align-items:center;justify-content:center;
+  z-index:10;
+}
+.menu{
+  background:white;padding:20px;border-radius:12px;
+  width:260px;text-align:center;
+}
+input{width:100%;padding:8px;margin-bottom:10px;}
+.skins{display:flex;justify-content:space-between;margin-bottom:10px;}
+.skin{
+  width:40px;height:40px;border-radius:6px;
+  border:2px solid transparent;cursor:pointer;
+}
+.skin.selected{border-color:black;}
+button{
+  width:100%;padding:10px;font-size:16px;margin-top:6px;
+}
+#leaderboard{
+  position:fixed;top:8px;right:8px;
+  background:rgba(255,255,255,.9);
+  padding:6px 8px;border-radius:6px;font-size:12px;
+}
+.skin img{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  border-radius:6px;
+  pointer-events:none;
+}
+</style>
+</head>
+
+<body>
+
+<div id="startScreen">
+  <div class="menu">
+    <h3>Doodle Jump</h3>
+    <input id="nameInput" placeholder="Name">
+
+    <div class="skins">
+      <div class="skin selected" data-color="green">
+        <img src="img/player_green.png">
+      </div>
+      <div class="skin" data-color="blue">
+        <img src="img/player_blue.png">
+      </div>
+      <div class="skin" data-color="red">
+        <img src="img/player_red.png">
+      </div>
+      <div class="skin" data-color="purple">
+        <img src="img/player_purple.png">
+      </div>
+    </div>
+
+    <button id="playBtn">PLAY</button>
+
+    <p style="margin-top:12px;font-size:12px;">
+Discord - @Shkobel<br>
+Twitter - @Dar02419718
+</p>
+  </div>
+</div>
+
+<div id="gameOverScreen" style="display:none">
+  <div class="menu">
+    <h3>Game Over</h3>
+    <p id="finalScore"></p>
+    <button onclick="restartGame()">🔁 Restart</button>
+    <button onclick="goHome()">🏠 Home</button>
+  </div>
+</div>
+
+<canvas id="game"></canvas>
+<div id="leaderboard"></div>
+
+<script>
+
+/* ===== CANVAS ===== */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+ctx.imageSmoothingEnabled = false;
+  
+let IS_MOBILE = false;
+let GAME_WIDTH = 0;
+
+function resize(){
+  IS_MOBILE = innerWidth < 768;
+  GAME_WIDTH = IS_MOBILE ? innerWidth : 420;
+
+  canvas.width = GAME_WIDTH;
+  canvas.height = innerHeight;
+}
+resize();
+addEventListener("resize", resize);
+
+
+/* ===== IMAGES ===== */
+
+const bgImage = new Image();
+bgImage.src = "img/bg.png";
+
+const playerSkins = {
+  green: new Image(),
+  blue: new Image(),
+  red: new Image(),
+  purple: new Image()
+};
+
+playerSkins.green.src = "img/player_green.png";
+playerSkins.blue.src  = "img/player_blue.png";
+playerSkins.red.src   = "img/player_red.png";
+playerSkins.purple.src= "img/player_purple.png";
+
+const monsterImages = [
+  "img/monster1.png",
+  "img/monster2.png"
+].map(src=>{
+  const i=new Image();
+  i.src=src;
+  return i;
+});
+
+/* === НОВЫЕ КАРТИНКИ === */
+
+const springImg = new Image();
+springImg.src = "img/spring.png";
+
+const coinImg = new Image();
+coinImg.src = "img/coin.png";
+
+  /* ===== PLATFORM IMAGES ===== */
+
+const platformImages = {
+  normal: new Image(),
+  move: new Image(),
+  break: new Image()
+};
+
+platformImages.normal.src = "img/platform_normal.png";
+platformImages.move.src = "img/platform_move.png";
+platformImages.break.src = "img/platform_break.png";
+
+
+/* ===== DATA ===== */
+
+let playerName = localStorage.getItem("name") || "";
+let playerColor = localStorage.getItem("color") || "green";
+let score = 0;
+let gameStarted = false;
+
+let leaderboard = JSON.parse(localStorage.getItem("leaderboard")) || [];
+
+
+/* ===== PLAYER ===== */
+
+const player = {
+  x:0,
+  y:0,
+  w:40,      // физический хитбокс
+  h:40,
+  drawW:50,  // визуальный размер (можно менять)
+  drawH:50,
+  vx:0,
+  vy:0
+};
+
+const GRAVITY = IS_MOBILE ? 0.4 : 0.38;
+const JUMP    = IS_MOBILE ? -15 : -14.5;
+const SPEED_X = IS_MOBILE ? 4 : 3.5;
+
+
+/* ===== OBJECTS ===== */
+
+let platforms = [];
+let monsters = [];
+let springs = [];
+let coins = [];
+
+let springBoost = false;
+
+let lastTime = performance.now();
+
+
+/* ===== UI ===== */
+
+document.getElementById("nameInput").value = playerName;
+
+document.querySelectorAll(".skin").forEach(s=>{
+  if(s.dataset.color===playerColor) s.classList.add("selected");
+
+  s.onclick=()=>{
+    document.querySelectorAll(".skin")
+    .forEach(x=>x.classList.remove("selected"));
+
+    s.classList.add("selected");
+    playerColor=s.dataset.color;
+
+    localStorage.setItem("color",playerColor);
+  };
+});
+
+
+document.getElementById("playBtn").onclick=()=>{
+  playerName=document.getElementById("nameInput").value||"Player";
+  localStorage.setItem("name",playerName);
+
+  document.getElementById("startScreen").style.display="none";
+
+  startGame();
+};
+
+
+/* ===== INIT ===== */
+
+function startGame(){
+
+  gameStarted=true;
+
+  score=0;
+
+  platforms=[];
+  monsters=[];
+  springs=[];
+  coins=[];
+
+  player.x=GAME_WIDTH/2-player.w/2;
+  player.y=canvas.height-200;
+
+  player.vx=0;
+  player.vy=JUMP;
+
+  platforms.push(makePlatform(player.x-30,player.y+60,"normal"));
+
+  for(let i=1;i<36;i++)
+    spawnPlatform(platforms[i-1].y-50);
+}
+
+
+/* ===== PLATFORMS ===== */
+
+function makePlatform(x,y,type){
+  return{
+    x,y,
+
+    // ⭐ визуальный размер платформы
+    drawW:type==="normal"?80:70,
+    drawH:32,
+
+    // ⭐ физический хитбокс (меньше)
+    w:(type==="normal"?80:70)*0.85,
+    h:32*0.5,
+    type,
+    vx:type==="move"?(Math.random()<.5?-1:1)*1.2:0,
+    broken:false,
+    counted:false
+  };
+}
+
+function spawnPlatform(y){
+
+  let r=Math.random(),type="normal";
+
+  if(r<.12) type="break";
+  else if(r<.28) type="move";
+
+  platforms.push(
+    makePlatform(
+      Math.random()*(GAME_WIDTH-65),
+      y,
+      type
+    )
+  );
+}
+
+
+/* ===== СПАВН ПРУЖИН ===== */
+
+function trySpawnSpring(p){
+
+  if(Math.random()>0.15) return;
+
+  springs.push({
+  x:p.x+p.w/2-15,
+  y:p.y-25,
+
+  drawW:30,
+  drawH:30,
+
+  w:18,
+  h:18
+});
+
+}
+
+
+/* ===== СПАВН МОНЕТ ===== */
+
+function trySpawnCoin(p){
+
+  if(Math.random()>0.35) return;
+
+  coins.push({
+    x:p.x+p.w/2-17,
+    y:p.y-40,
+
+    // визуал
+    drawW:34,
+    drawH:34,
+
+    // хитбокс меньше
+    w:20,
+    h:20,
+    taken:false
+  });
+
+}
+
+
+/* ===== MONSTERS ===== */
+
+function trySpawnMonster(p){
+
+  if(score<6) return;
+  if(Math.random()>0.25) return;
+
+  const minDist=180;
+
+  for(let m of monsters)
+    if(Math.abs(m.y-p.y)<minDist) return;
+
+  monsters.push({
+    x:p.x+p.w/2-20,
+    y:p.y-45,
+    drawW:40,
+    drawH:40,
+
+    // хитбокс меньше
+    w:30,
+    h:30,
+    vx:(Math.random()<.5?-1:1)*(IS_MOBILE?1.4:1.6),
+    skin:monsterImages[Math.floor(Math.random()*monsterImages.length)]
+  });
+
+}
+
+
+/* ===== UPDATE ===== */
+
+function update(dt){
+
+  if(!gameStarted) return;
+
+  player.vy+=GRAVITY*dt;
+
+  player.x+=player.vx*dt;
+  player.y+=player.vy*dt;
+
+  if(player.x<-player.w) player.x=GAME_WIDTH;
+  if(player.x>GAME_WIDTH) player.x=-player.w;
+
+
+  platforms.forEach(p=>{
+
+    if(p.type==="move"){
+      p.x+=p.vx*dt;
+      if(p.x<0||p.x+p.w>GAME_WIDTH) p.vx*=-1;
+    }
+
+    if(!p.broken && player.vy>0 &&
+  player.y+player.h>=p.y &&
+  player.y+player.h<=p.y+p.h+player.vy &&
+  player.x+player.w>p.x &&
+  player.x<p.x+p.w){
+
+      if(p.type==="break") p.broken=true;
+      else{
+        player.vy=JUMP;
+        springBoost = false;
+        if(!p.counted){score++;p.counted=true;}
+      }
+    }
+
+  });
+
+
+  /* ПРУЖИНЫ */
+
+  springs.forEach(s=>{
+
+    if(
+      player.x < s.x+s.w &&
+      player.x+player.w > s.x &&
+      player.y < s.y+s.h &&
+      player.y+player.h > s.y
+    ){
+
+      player.vy = JUMP*1.8;
+      springBoost = true;
+
+    }
+
+  });
+
+
+  /* МОНЕТЫ */
+
+  coins.forEach(c=>{
+
+    if(c.taken) return;
+
+    if(
+      player.x < c.x+c.w &&
+      player.x+player.w > c.x &&
+      player.y < c.y+c.h &&
+      player.y+player.h > c.y
+    ){
+
+      c.taken=true;
+
+      score+=2;
+
+    }
+
+  });
+
+
+  monsters.forEach(m=>{
+    m.x+=m.vx*dt;
+
+    if(m.x<0||m.x+m.w>GAME_WIDTH) m.vx*=-1;
+
+    if(!springBoost &&
+  player.x<m.x+m.w &&
+  player.x+player.w>m.x &&
+  player.y<m.y+m.h &&
+  player.y+player.h>m.y
+) gameOver();
+
+  });
+
+
+  if(player.y<canvas.height*.45){
+
+    const dy=-player.vy*dt;
+
+    player.y=canvas.height*.45;
+
+    platforms.forEach(p=>p.y+=dy);
+    monsters.forEach(m=>m.y+=dy);
+    springs.forEach(s=>s.y+=dy);
+    coins.forEach(c=>c.y+=dy);
+
+
+    platforms.forEach(p=>{
+
+      if(p.y>canvas.height){
+
+        const top=Math.min(...platforms.map(x=>x.y));
+
+        p.y=top-90;
+
+        p.x=Math.random()*(GAME_WIDTH-p.w);
+
+        p.broken=false;
+        p.counted=false;
+
+        trySpawnMonster(p);
+        trySpawnSpring(p);
+        trySpawnCoin(p);
+
+      }
+
+    });
+
+  }
+
+  if(player.y>canvas.height) gameOver();
+
+}
+
+
+/* ===== DRAW ===== */
+
+function draw(){
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  ctx.drawImage(bgImage,0,0,canvas.width,canvas.height);
+
+
+ ctx.drawImage(
+  playerSkins[playerColor],
+  player.x,player.y,player.drawW,player.drawH
+);
+
+
+  platforms.forEach(p=>{
+  if(p.broken) return;
+
+  const img = platformImages[p.type] || platformImages.normal;
+
+  ctx.drawImage(img,p.x,p.y,p.drawW,p.drawH);
+});
+
+
+  monsters.forEach(m=>{
+    ctx.drawImage(m.skin,m.x,m.y,m.drawW,m.drawH);
+  });
+
+
+  springs.forEach(s=>{
+    ctx.drawImage(springImg,s.x,s.y,s.drawW,s.drawH);
+  });
+
+
+  coins.forEach(c=>{
+    if(!c.taken)
+     ctx.drawImage(coinImg,c.x,c.y,c.drawW,c.drawH);
+  });
+
+
+  ctx.fillStyle="black";
+  ctx.font="18px Arial";
+
+  ctx.fillText(`${playerName}: ${score}`,10,26);
+
+}
+
+/* ===== LOOP ===== */
+
+function loop(t){
+
+  const dt=Math.min((t-lastTime)/16,1.5);
+
+  lastTime=t;
+
+  update(dt);
+  draw();
+
+  updateLeaderboard();
+
+  requestAnimationFrame(loop);
+
+}
+
+requestAnimationFrame(loop);
+
+
+/* ===== LEADERBOARD ===== */
+
+function updateLeaderboard(){
+
+  document.getElementById("leaderboard").innerHTML=
+    "<b>TOP 5</b><br>"+
+    leaderboard.slice(0,5)
+    .map((p,i)=>`${i+1}. ${p.name}: ${p.score}`)
+    .join("<br>");
+
+}
+
+function saveScore(){
+
+  const e=leaderboard.find(p=>p.name===playerName);
+
+  if(e){
+    if(score>e.score)e.score=score;
+  }
+  else{
+    leaderboard.push({name:playerName,score});
+  }
+
+  leaderboard.sort((a,b)=>b.score-a.score);
+
+  localStorage.setItem(
+    "leaderboard",
+    JSON.stringify(leaderboard)
+  );
+
+}
+
+
+/* ===== GAME OVER ===== */
+
+function gameOver(){
+
+  saveScore();
+
+  gameStarted=false;
+
+  document.getElementById("finalScore").innerText=`Score: ${score}`;
+
+  document.getElementById("gameOverScreen").style.display="flex";
+
+}
+
+function restartGame(){
+
+  document.getElementById("gameOverScreen").style.display="none";
+
+  startGame();
+
+}
+
+function goHome(){
+
+  document.getElementById("gameOverScreen").style.display="none";
+
+  document.getElementById("startScreen").style.display="flex";
+
+}
+
+
+/* ===== CONTROLS ===== */
+
+addEventListener("keydown",e=>{
+
+  if(!gameStarted)return;
+
+  if(e.key==="ArrowLeft") player.vx=-SPEED_X;
+
+  if(e.key==="ArrowRight") player.vx=SPEED_X;
+
+});
+
+addEventListener("keyup",()=>player.vx=0);
+
+
+canvas.addEventListener("touchstart",e=>{
+
+  if(!gameStarted)return;
+
+  e.preventDefault();
+
+  player.vx =
+    e.touches[0].clientX<GAME_WIDTH/2
+      ? -SPEED_X
+      : SPEED_X;
+
+},{passive:false});
+
+
+canvas.addEventListener("touchend",e=>{
+
+  if(!gameStarted)return;
+
+  e.preventDefault();
+
+  player.vx=0;
+
+},{passive:false});
+
+</script>
+
+</body>
+</html>
