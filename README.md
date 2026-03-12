@@ -1,9 +1,9 @@
-# Kash-Doodle
+# Kash-Jump
 
 
-Kash Doodle
+Kash-Jump
 
-K is aDoodle Jump. The projeKash project to provide users with a fun and interactive mini-game experience.
+Kash-Jump. The projeKash project to provide users with a fun and interactive mini-game experience.
 
 About the Game
 
